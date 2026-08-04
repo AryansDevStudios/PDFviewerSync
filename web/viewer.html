@@ -482,5 +482,69 @@ See https://github.com/adobe-type-tools/cmap-resources
     <div id="printContainer"></div>
 
     <input type="file" id="fileInput" class="hidden">
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCiWFfvoctI12c3qvfL6H0bsaVJVmho0Vg",
+    authDomain: "pdfviewerconfig.firebaseapp.com",
+    projectId: "pdfviewerconfig",
+    storageBucket: "pdfviewerconfig.firebasestorage.app",
+    messagingSenderId: "139405347959",
+    appId: "1:139405347959:web:eeff2ad4287c71555a8a72"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const pdfDocRef = doc(db, "pdf_sessions", "active_session");
+
+  let isRemoteUpdate = false;
+  let syncTimeout = null;
+
+  document.addEventListener('webviewerloaded', () => {
+    const checkReady = setInterval(() => {
+      if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
+        clearInterval(checkReady);
+        setupSync(window.PDFViewerApplication);
+      }
+    }, 100);
+  });
+
+  function setupSync(viewerApp) {
+    onSnapshot(pdfDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        isRemoteUpdate = true;
+        const data = docSnap.data();
+
+        if (viewerApp.page !== data.page) viewerApp.page = data.page;
+        if (viewerApp.pdfViewer.currentScaleValue !== data.scaleValue) viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
+        
+        const container = viewerApp.pdfViewer.container;
+        if (container.scrollTop !== data.scrollTop || container.scrollLeft !== data.scrollLeft) {
+          container.scrollTop = data.scrollTop;
+          container.scrollLeft = data.scrollLeft;
+        }
+
+        setTimeout(() => { isRemoteUpdate = false; }, 300);
+      }
+    });
+
+    viewerApp.eventBus.on('updateviewarea', () => {
+      if (isRemoteUpdate) return;
+      
+      clearTimeout(syncTimeout);
+      syncTimeout = setTimeout(() => {
+        setDoc(pdfDocRef, {
+          page: viewerApp.page,
+          scaleValue: String(viewerApp.pdfViewer.currentScaleValue),
+          scrollTop: viewerApp.pdfViewer.container.scrollTop,
+          scrollLeft: viewerApp.pdfViewer.container.scrollLeft,
+          timestamp: Date.now()
+        }, { merge: true });
+      }, 100);
+    });
+  }
+</script>
   </body>
 </html>
