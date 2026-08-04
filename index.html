@@ -1264,13 +1264,19 @@ See https://github.com/adobe-type-tools/cmap-resources
         
         isRemoteUpdate = true;
         
-        if (viewerApp.page !== data.page) viewerApp.page = data.page;
-        if (String(viewerApp.pdfViewer.currentScaleValue) !== data.scaleValue) viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
-        
         const container = viewerApp.pdfViewer.container;
-        if (container.scrollTop !== data.scrollTop || container.scrollLeft !== data.scrollLeft) {
-          container.scrollTop = data.scrollTop;
-          container.scrollLeft = data.scrollLeft;
+        
+        const maxScrollTop = container.scrollHeight - container.clientHeight;
+        const targetScrollTop = maxScrollTop > 0 ? (data.scrollRatioY || 0) * maxScrollTop : 0;
+        
+        const maxScrollLeft = container.scrollWidth - container.clientWidth;
+        const targetScrollLeft = maxScrollLeft > 0 ? (data.scrollRatioX || 0) * maxScrollLeft : 0;
+
+        // Apply if diff is larger than 2 pixels to prevent float rounding loops
+        if (Math.abs(container.scrollTop - targetScrollTop) > 2 || 
+            Math.abs(container.scrollLeft - targetScrollLeft) > 2) {
+          container.scrollTop = targetScrollTop;
+          container.scrollLeft = targetScrollLeft;
         }
 
         setTimeout(() => { isRemoteUpdate = false; }, 15);
@@ -1282,11 +1288,17 @@ See https://github.com/adobe-type-tools/cmap-resources
       if (!syncTimeout) {
         syncTimeout = setTimeout(() => {
           syncTimeout = null;
+          
+          const container = viewerApp.pdfViewer.container;
+          const maxScrollTop = container.scrollHeight - container.clientHeight;
+          const scrollRatioY = maxScrollTop > 0 ? container.scrollTop / maxScrollTop : 0;
+          
+          const maxScrollLeft = container.scrollWidth - container.clientWidth;
+          const scrollRatioX = maxScrollLeft > 0 ? container.scrollLeft / maxScrollLeft : 0;
+
           const updateData = {
-            page: viewerApp.page,
-            scaleValue: String(viewerApp.pdfViewer.currentScaleValue),
-            scrollTop: viewerApp.pdfViewer.container.scrollTop,
-            scrollLeft: viewerApp.pdfViewer.container.scrollLeft,
+            scrollRatioY: scrollRatioY,
+            scrollRatioX: scrollRatioX,
             timestamp: Date.now(),
             sender: sessionId
           };
