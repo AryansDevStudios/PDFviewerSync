@@ -1250,14 +1250,12 @@ See https://github.com/adobe-type-tools/cmap-resources
   let isRemoteUpdate = false;
   let syncTimeout = null;
 
-  document.addEventListener('webviewerloaded', () => {
-    const checkReady = setInterval(() => {
-      if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
-        clearInterval(checkReady);
-        setupSync(window.PDFViewerApplication);
-      }
-    }, 100);
-  });
+  const checkReady = setInterval(() => {
+    if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
+      clearInterval(checkReady);
+      setupSync(window.PDFViewerApplication);
+    }
+  }, 100);
 
   function setupSync(viewerApp) {
     onSnapshot(pdfDocRef, (docSnap) => {
