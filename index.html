@@ -1231,6 +1231,7 @@ See https://github.com/adobe-type-tools/cmap-resources
     <!-- outerContainer -->
     <div id="printContainer"></div>
 <script type="module">
+  console.log("[Sync] Firebase script initialized.");
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
   import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
@@ -1250,44 +1251,72 @@ See https://github.com/adobe-type-tools/cmap-resources
   let isRemoteUpdate = false;
   let syncTimeout = null;
 
+  console.log("[Sync] Starting poll for PDFViewerApplication...");
   const checkReady = setInterval(() => {
     if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
+      console.log("[Sync] Found PDFViewerApplication!", window.PDFViewerApplication);
       clearInterval(checkReady);
       setupSync(window.PDFViewerApplication);
     }
   }, 100);
 
   function setupSync(viewerApp) {
+    console.log("[Sync] Setting up sync listener on:", viewerApp);
     onSnapshot(pdfDocRef, (docSnap) => {
       if (docSnap.exists()) {
-        isRemoteUpdate = true;
         const data = docSnap.data();
+        console.log("[Sync] Remote update received from Firebase:", data);
+        isRemoteUpdate = true;
 
-        if (viewerApp.page !== data.page) viewerApp.page = data.page;
-        if (viewerApp.pdfViewer.currentScaleValue !== data.scaleValue) viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
+        if (viewerApp.page !== data.page) {
+          console.log(`[Sync] Updating page from ${viewerApp.page} to ${data.page}`);
+          viewerApp.page = data.page;
+        }
+        if (viewerApp.pdfViewer.currentScaleValue !== data.scaleValue) {
+          console.log(`[Sync] Updating scale from ${viewerApp.pdfViewer.currentScaleValue} to ${data.scaleValue}`);
+          viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
+        }
         
         const container = viewerApp.pdfViewer.container;
         if (container.scrollTop !== data.scrollTop || container.scrollLeft !== data.scrollLeft) {
+          console.log(`[Sync] Updating scroll from (top:${container.scrollTop}, left:${container.scrollLeft}) to (top:${data.scrollTop}, left:${data.scrollLeft})`);
           container.scrollTop = data.scrollTop;
           container.scrollLeft = data.scrollLeft;
         }
 
-        setTimeout(() => { isRemoteUpdate = false; }, 300);
+        setTimeout(() => { 
+          isRemoteUpdate = false; 
+          console.log("[Sync] Remote update block released.");
+        }, 300);
+      } else {
+        console.log("[Sync] No remote data exists yet.");
       }
+    }, (error) => {
+      console.error("[Sync] Firebase onSnapshot error:", error);
     });
 
     viewerApp.eventBus.on('updateviewarea', () => {
-      if (isRemoteUpdate) return;
+      if (isRemoteUpdate) {
+        console.log("[Sync] Local updateviewarea ignored (remote update in progress).");
+        return;
+      }
+      console.log("[Sync] Local updateviewarea triggered. Queueing update to Firebase...");
       
       clearTimeout(syncTimeout);
       syncTimeout = setTimeout(() => {
-        setDoc(pdfDocRef, {
+        const updateData = {
           page: viewerApp.page,
           scaleValue: String(viewerApp.pdfViewer.currentScaleValue),
           scrollTop: viewerApp.pdfViewer.container.scrollTop,
           scrollLeft: viewerApp.pdfViewer.container.scrollLeft,
           timestamp: Date.now()
-        }, { merge: true });
+        };
+        console.log("[Sync] Sending update to Firebase:", updateData);
+        setDoc(pdfDocRef, updateData, { merge: true }).then(() => {
+          console.log("[Sync] Update successfully saved to Firebase.");
+        }).catch((err) => {
+          console.error("[Sync] Error saving update to Firebase:", err);
+        });
       }, 100);
     });
   }
