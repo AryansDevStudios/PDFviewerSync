@@ -347,6 +347,17 @@ See https://github.com/adobe-type-tools/cmap-resources
                 </span>
               </div>
               <div id="toolbarViewerRight" class="toolbarHorizontalGroup">
+                <!-- Sync Toggle Button -->
+                <button
+                  id="syncToggleButton"
+                  class="toolbarButton"
+                  type="button"
+                  title="Toggle Firebase Sync"
+                  tabindex="0"
+                  style="width: auto; padding: 0 10px; color: #fff; font-weight: bold; background-color: #4CAF50; border-radius: 4px; margin: 2px 4px;"
+                >
+                  <span id="syncToggleText">Sync: ON</span>
+                </button>
                 <div id="editorModeButtons" class="toolbarHorizontalGroup">
                   <div id="signatureProperties" class="toolbarButtonWithContainer" hidden="true">
                     <button
@@ -1250,48 +1261,88 @@ See https://github.com/adobe-type-tools/cmap-resources
   const sessionId = Math.random().toString(36).substring(2, 15);
   let isRemoteUpdate = false;
   let syncTimeout = null;
+  let unsubscribeSnapshot = null;
+  let currentViewerApp = null;
+  let currentFingerprint = null;
+  let updateViewAreaHandler = null;
+
+  // Retrieve setting
+  let syncEnabled = localStorage.getItem("firebaseSyncEnabled") !== "false";
+  
+  // UI Button Logic
+  const syncBtn = document.getElementById("syncToggleButton");
+  const syncBtnText = document.getElementById("syncToggleText");
+  
+  function updateSyncUI() {
+    if (syncEnabled) {
+      syncBtnText.innerText = "Sync: ON";
+      syncBtn.style.backgroundColor = "#4CAF50"; // Green
+    } else {
+      syncBtnText.innerText = "Sync: OFF";
+      syncBtn.style.backgroundColor = "#F44336"; // Red
+    }
+  }
+  
+  syncBtn.addEventListener("click", () => {
+    syncEnabled = !syncEnabled;
+    localStorage.setItem("firebaseSyncEnabled", syncEnabled);
+    updateSyncUI();
+    
+    if (syncEnabled) {
+      if (currentViewerApp && currentFingerprint) {
+        setupSync(currentViewerApp, currentFingerprint);
+      }
+    } else {
+      teardownSync();
+    }
+  });
+  updateSyncUI();
 
   console.log(`[Sync] Starting poll for PDFViewerApplication... (Session ID: ${sessionId})`);
   const checkReady = setInterval(() => {
     if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
-      console.log("[Sync] Found PDFViewerApplication!", window.PDFViewerApplication);
       clearInterval(checkReady);
+      currentViewerApp = window.PDFViewerApplication;
       
-      const viewerApp = window.PDFViewerApplication;
-      
-      // Wait for document to load to get its unique fingerprint
-      viewerApp.eventBus.on('documentloaded', () => {
-        const fingerprint = viewerApp.pdfDocument.fingerprints[0];
-        console.log("[Sync] Document loaded. Fingerprint:", fingerprint);
-        setupSync(viewerApp, fingerprint);
+      currentViewerApp.eventBus.on('documentloaded', () => {
+        currentFingerprint = currentViewerApp.pdfDocument.fingerprints[0];
+        console.log("[Sync] Document loaded. Fingerprint:", currentFingerprint);
+        if (syncEnabled) {
+          setupSync(currentViewerApp, currentFingerprint);
+        } else {
+          console.log("[Sync] Sync is disabled via local storage. Running as standard viewer.");
+        }
       });
     }
   }, 100);
 
+  function teardownSync() {
+    console.log("[Sync] Tearing down sync...");
+    if (unsubscribeSnapshot) {
+      unsubscribeSnapshot();
+      unsubscribeSnapshot = null;
+    }
+    if (currentViewerApp && updateViewAreaHandler) {
+      currentViewerApp.eventBus.off('updateviewarea', updateViewAreaHandler);
+      updateViewAreaHandler = null;
+    }
+  }
+
   function setupSync(viewerApp, fingerprint) {
-    console.log("[Sync] Setting up instant sync listener for fingerprint:", fingerprint);
+    teardownSync(); // Ensure no duplicate bindings
     
-    // Create unique doc ref for this specific PDF file
+    console.log("[Sync] Setting up instant sync listener for fingerprint:", fingerprint);
     const pdfDocRef = doc(db, "pdf_sessions", fingerprint);
 
-    onSnapshot(pdfDocRef, (docSnap) => {
+    unsubscribeSnapshot = onSnapshot(pdfDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        if (data.sender === sessionId) return;
         
-        // Prevent rubber-banding: entirely ignore updates originated by THIS exact browser tab
-        if (data.sender === sessionId) {
-            return;
-        }
-        
-        console.log("[Sync] Instant remote update received:", data);
         isRemoteUpdate = true;
-
-        if (viewerApp.page !== data.page) {
-          viewerApp.page = data.page;
-        }
-        if (String(viewerApp.pdfViewer.currentScaleValue) !== data.scaleValue) {
-          viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
-        }
+        
+        if (viewerApp.page !== data.page) viewerApp.page = data.page;
+        if (String(viewerApp.pdfViewer.currentScaleValue) !== data.scaleValue) viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
         
         const container = viewerApp.pdfViewer.container;
         if (container.scrollTop !== data.scrollTop || container.scrollLeft !== data.scrollLeft) {
@@ -1299,22 +1350,15 @@ See https://github.com/adobe-type-tools/cmap-resources
           container.scrollLeft = data.scrollLeft;
         }
 
-        // Tiny delay to let DOM events (like updateviewarea) clear out synchronously
-        setTimeout(() => { 
-          isRemoteUpdate = false; 
-        }, 15);
+        setTimeout(() => { isRemoteUpdate = false; }, 15);
       }
-    }, (error) => {
-      console.error("[Sync] Firebase onSnapshot error:", error);
     });
 
-    viewerApp.eventBus.on('updateviewarea', () => {
+    updateViewAreaHandler = () => {
       if (isRemoteUpdate) return;
-      
-      // Throttle writes to max 20 per second (every 50ms) to ensure smooth scrolling
       if (!syncTimeout) {
         syncTimeout = setTimeout(() => {
-          syncTimeout = null; // Clear immediately so the next scroll can queue
+          syncTimeout = null;
           const updateData = {
             page: viewerApp.page,
             scaleValue: String(viewerApp.pdfViewer.currentScaleValue),
@@ -1323,13 +1367,12 @@ See https://github.com/adobe-type-tools/cmap-resources
             timestamp: Date.now(),
             sender: sessionId
           };
-          
-          setDoc(pdfDocRef, updateData, { merge: true }).catch((err) => {
-            console.error("[Sync] Error saving update to Firebase:", err);
-          });
+          setDoc(pdfDocRef, updateData, { merge: true }).catch(err => console.error(err));
         }, 50);
       }
-    });
+    };
+
+    viewerApp.eventBus.on('updateviewarea', updateViewAreaHandler);
   }
 </script>
   </body>
