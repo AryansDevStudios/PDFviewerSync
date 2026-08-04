@@ -1247,9 +1247,11 @@ See https://github.com/adobe-type-tools/cmap-resources
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
+  const sessionId = Math.random().toString(36).substring(2, 15);
   let isRemoteUpdate = false;
+  let syncTimeout = null;
 
-  console.log("[Sync] Starting poll for PDFViewerApplication...");
+  console.log(`[Sync] Starting poll for PDFViewerApplication... (Session ID: ${sessionId})`);
   const checkReady = setInterval(() => {
     if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
       console.log("[Sync] Found PDFViewerApplication!", window.PDFViewerApplication);
@@ -1276,13 +1278,9 @@ See https://github.com/adobe-type-tools/cmap-resources
       if (docSnap.exists()) {
         const data = docSnap.data();
         
-        // Prevent infinite loops by skipping if values match exactly
-        const container = viewerApp.pdfViewer.container;
-        if (viewerApp.page === data.page &&
-            String(viewerApp.pdfViewer.currentScaleValue) === data.scaleValue &&
-            container.scrollTop === data.scrollTop &&
-            container.scrollLeft === data.scrollLeft) {
-            return; // No-op
+        // Prevent rubber-banding: entirely ignore updates originated by THIS exact browser tab
+        if (data.sender === sessionId) {
+            return;
         }
         
         console.log("[Sync] Instant remote update received:", data);
@@ -1295,6 +1293,7 @@ See https://github.com/adobe-type-tools/cmap-resources
           viewerApp.pdfViewer.currentScaleValue = data.scaleValue;
         }
         
+        const container = viewerApp.pdfViewer.container;
         if (container.scrollTop !== data.scrollTop || container.scrollLeft !== data.scrollLeft) {
           container.scrollTop = data.scrollTop;
           container.scrollLeft = data.scrollLeft;
@@ -1312,18 +1311,24 @@ See https://github.com/adobe-type-tools/cmap-resources
     viewerApp.eventBus.on('updateviewarea', () => {
       if (isRemoteUpdate) return;
       
-      const updateData = {
-        page: viewerApp.page,
-        scaleValue: String(viewerApp.pdfViewer.currentScaleValue),
-        scrollTop: viewerApp.pdfViewer.container.scrollTop,
-        scrollLeft: viewerApp.pdfViewer.container.scrollLeft,
-        timestamp: Date.now()
-      };
-      
-      // Write instantly to Firebase without any setTimeout debounce
-      setDoc(pdfDocRef, updateData, { merge: true }).catch((err) => {
-        console.error("[Sync] Error saving update to Firebase:", err);
-      });
+      // Throttle writes to max 20 per second (every 50ms) to ensure smooth scrolling
+      if (!syncTimeout) {
+        syncTimeout = setTimeout(() => {
+          syncTimeout = null; // Clear immediately so the next scroll can queue
+          const updateData = {
+            page: viewerApp.page,
+            scaleValue: String(viewerApp.pdfViewer.currentScaleValue),
+            scrollTop: viewerApp.pdfViewer.container.scrollTop,
+            scrollLeft: viewerApp.pdfViewer.container.scrollLeft,
+            timestamp: Date.now(),
+            sender: sessionId
+          };
+          
+          setDoc(pdfDocRef, updateData, { merge: true }).catch((err) => {
+            console.error("[Sync] Error saving update to Firebase:", err);
+          });
+        }, 50);
+      }
     });
   }
 </script>
