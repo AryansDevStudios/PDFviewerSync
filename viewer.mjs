@@ -20880,9 +20880,9 @@ function getViewerConfiguration() {
       editorCommentParamsToolbar: document.getElementById("editorCommentParamsToolbar"),
       editorFreeTextButton: document.getElementById("editorFreeTextButton"),
       editorFreeTextParamsToolbar: document.getElementById("editorFreeTextParamsToolbar"),
-      editorHighlightButton: document.getElementById("editorHighlightButton"),
-      editorHighlightParamsToolbar: document.getElementById("editorHighlightParamsToolbar"),
-      editorHighlightColorPicker: document.getElementById("editorHighlightColorPicker"),
+      editorHighlightButton: document.createElement("button"),
+      editorHighlightParamsToolbar: document.createElement("div"),
+      editorHighlightColorPicker: document.createElement("div"),
       editorInkButton: document.getElementById("editorInkButton"),
       editorInkParamsToolbar: document.getElementById("editorInkParamsToolbar"),
       editorStampButton: document.createElement("button"),
@@ -21089,8 +21089,8 @@ function getViewerConfiguration() {
       editorInkOpacity: document.getElementById("editorInkOpacity"),
       editorStampAddImage: document.createElement("button"),
       editorSignatureAddSignature: document.getElementById("editorSignatureAddSignature"),
-      editorFreeHighlightThickness: document.getElementById("editorFreeHighlightThickness"),
-      editorHighlightShowAll: document.getElementById("editorHighlightShowAll")
+      editorFreeHighlightThickness: document.createElement("input"),
+      editorHighlightShowAll: document.createElement("button")
     },
     printContainer: document.getElementById("printContainer"),
     editorUndoBar: {
